@@ -1,1 +1,0 @@
-/home/yan/.nextflow/assets/nf-core/bacass/docs/output.md
