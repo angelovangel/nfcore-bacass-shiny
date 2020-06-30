@@ -1,0 +1,26 @@
+
+id: 'nf-core-bacass-summary'
+description: " - this information is collected when the pipeline is started."
+section_name: 'nf-core/bacass Workflow Summary'
+section_href: 'https://github.com/nf-core/bacass'
+plot_type: 'html'
+data: |
+    <dl class="dl-horizontal">
+        <dt>Pipeline Release</dt><dd><samp>master</samp></dd>
+        <dt>Pipeline Name</dt><dd><samp>nf-core/bacass</samp></dd>
+        <dt>Run Name</dt><dd><samp>peaceful_hopper</samp></dd>
+        <dt>Assembler Method</dt><dd><samp>unicycler</samp></dd>
+        <dt>Assembly Type</dt><dd><samp>short</samp></dd>
+        <dt>Extra Prokka arguments</dt><dd><samp><span style="color:#999999;">N/A</a></samp></dd>
+        <dt>Extra Unicycler arguments</dt><dd><samp><span style="color:#999999;">N/A</a></samp></dd>
+        <dt>Extra Canu arguments</dt><dd><samp><span style="color:#999999;">N/A</a></samp></dd>
+        <dt>Skip Kraken2</dt><dd><samp>--annotation_tool dfast</samp></dd>
+        <dt>Polish Method</dt><dd><samp>medaka</samp></dd>
+        <dt>Max Resources</dt><dd><samp>64 GB memory, 32 cpus, 1d time per job</samp></dd>
+        <dt>Launch dir</dt><dd><samp>/home/yan/git/nfcore-bacass-shiny</samp></dd>
+        <dt>Output dir</dt><dd><samp>./results</samp></dd>
+        <dt>Working dir</dt><dd><samp>/home/yan/git/nfcore-bacass-shiny/work</samp></dd>
+        <dt>Script dir</dt><dd><samp>/home/yan/.nextflow/assets/nf-core/bacass</samp></dd>
+        <dt>User</dt><dd><samp>yan</samp></dd>
+        <dt>Config Profile</dt><dd><samp>conda</samp></dd>
+    </dl>
