@@ -11,7 +11,7 @@
  library(stringr)
  library(digest)
  #library(yaml)
- library(shinyFeedback)
+ #library(shinyFeedback)
  library(pingr) # to check if server has internet
  
  # define reactive to track user counts
@@ -38,7 +38,7 @@
     tabPanel("nf-core/bacass output",
             # attempts to use external progress bar
             includeCSS("css/custom.css"),
-            useShinyFeedback(),
+            #useShinyFeedback(),
             useShinyjs(),
             useShinyalert(), 
             
