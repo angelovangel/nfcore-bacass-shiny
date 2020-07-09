@@ -61,6 +61,11 @@
                          onMouseOver = "this.style.color = 'orange' ",
                          onMouseOut = "this.style.color = 'green' ", 
                          icon = icon("redo")),
+              # actionButton("stopButton", "STOP run", 
+              #              style = "color: green; font-weight: bold;", 
+              #              onMouseOver = "this.style.color = 'red' ", 
+              #              onMouseOut = "this.style.color = 'green' ", 
+              #              icon = icon("stop-circle-o")),
             
             actionButton("more", "More options", 
                          icon = icon("cog"),
@@ -72,10 +77,6 @@
             
             tags$div(id = "optional_inputs",
               absolutePanel(top = 140, right = 20,
-                          # textInput(inputId = "report_title",
-                          #           label = "Title of MultiQC report",
-                          #           value = "Summarized fastp report"),
-                          # tags$hr(),
                           selectizeInput("nxf_profile",
                                          label = "Select nextflow profile",
                                          choices = c("docker", "test,docker", "conda"),
@@ -197,8 +198,8 @@
       }
       # annotation tool
       optional_params$annotation_tool <- case_when(
-        input$annotation_tool == "prokka" ~ "--annotation_tool prokka",
-        input$annotation_tool == "dfast" ~ "--annotation_tool dfast"
+        input$annotation_tool == "prokka" ~ "prokka",
+        input$annotation_tool == "dfast" ~ "dfast"
       )
       
       if (is.integer(input$csv_file)) {
@@ -217,7 +218,7 @@
           "--input", 
           as.character(parseFilePaths(volumes, input$csv_file)$datapath), "\\ \n",
           "--skip_kraken2", "\\ \n",
-          optional_params$annotation_tool, "\\ \n",
+          "--annotation_tool", optional_params$annotation_tool, "\\ \n",
           "-profile", 
           input$nxf_profile,  "\\ \n",
           optional_params$tower, "\n",
@@ -243,6 +244,12 @@
     # 
     # 
     # }
+    
+    # kill function, used to kill the proc when the stopButton is pressed
+    # kill_func <- function(chunk, proc) {
+    #   if (input$stopButton >= 1) proc$kill() 
+    # }
+    
     # using processx to better control stdout
     observeEvent(input$run, {
       if(is.integer(input$csv_file)) {
@@ -250,10 +257,11 @@
       } else {
         # set run button color to red?
         shinyjs::disable(id = "commands_pannel")
+        # shinyjs::enable(id = "stopButton")
        
          # change label during run
         shinyjs::html(id = "run", html = "Running... please wait")
-        progress$set(message = "Processed ", value = 0)
+        progress$set(message = "Working... ", value = 0)
         on.exit(progress$close() )
         
       # Dean Attali's solution
@@ -267,17 +275,16 @@
                                "--input", 
                                as.character(parseFilePaths(volumes, input$csv_file)$datapath), 
                                "--skip_kraken2",
-                               optional_params$annotation_tool,
-                               "-profile", 
-                               input$nxf_profile,
+                               "--annotation_tool", optional_params$annotation_tool,
+                               "-profile", input$nxf_profile,
                                #optional_params$mqc),
                                optional_params$tower),
                       
                         #wd = parseDirPath(volumes, input$csv_file),
                         wd = dirname(as.character(parseFilePaths(volumes, input$csv_file)$datapath)),
                       #echo_cmd = TRUE, echo = TRUE,
-                      stdout_line_callback = function(line, proc) {message(line)}, 
-                      #stdout_callback = cb_count,
+                      stdout_line_callback = function(line, proc) {message(line)}, # here you can kill the proc!!!
+                      #stdout_callback = kill_func,
                       stderr_to_stdout = TRUE, 
                       error_on_status = FALSE
                       )
@@ -287,6 +294,8 @@
               runjs("document.getElementById('stdout').scrollTo(0,1e9);") # scroll the page to bottom with each message, 1e9 is just a big number
             }
         )
+        
+        
         if(p$status == 0) {
           # hide command pannel 
           shinyjs::hide("commands_pannel")
@@ -306,7 +315,7 @@
             
           # copy mqc to www/ to be able to open it, also use hash to enable multiple concurrent users
           # mqc_report <- paste(parseDirPath(volumes, input$fastq_folder), 
-          #                  "/results-fastp/multiqc_report.html", # make sure the nextflow-fastp pipeline writes to "results-fastp"
+          #                  "/results/multiqc_report.html", # make sure the nextflow-fastp pipeline writes to "results-fastp"
           #                  sep = "")
           #  
           # system2("cp", args = c(mqc_report, paste("www/", mqc_hash, sep = "")) )
@@ -314,22 +323,22 @@
           
           # render the new action buttons to show report
           # output$mqc_report_button <- renderUI({
-          #   actionButton("mqc", label = "MultiQC report", 
-          #                icon = icon("th"), 
+          #   actionButton("mqc", label = "MultiQC report",
+          #                icon = icon("th"),
           #                onclick = sprintf("window.open('%s', '_blank')", mqc_hash)
           #   )
           # })
-          
+          # 
           #
           # build js callback string for shinyalert
-          #js_cb_string <- sprintf("function(x) { if (x == true) {window.open('%s') ;} } ", mqc_hash)
+          # js_cb_string <- sprintf("function(x) { if (x == true) {window.open('%s') ;} } ", mqc_hash)
           
           shinyalert("Run finished!", type = "success", 
                    animation = "slide-from-bottom",
                    text = "Pipeline finished, check results folder", 
-                   showCancelButton = TRUE, 
-                   confirmButtonText = "Open report",
-                   callbackJS = js_cb_string, 
+                   showCancelButton = FALSE, 
+                   confirmButtonText = "OK",
+                   #callbackJS = js_cb_string 
                    #callbackR = function(x) { js$openmqc(mqc_url) }
                    )
         } else {
@@ -346,6 +355,7 @@
       }
       
     })
+    
     
     #------------------------------------------------------------
     session$onSessionEnded(function() {

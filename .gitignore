@@ -6,3 +6,4 @@ userlog
 .nextflow*
 results*
 work*
+testdata
