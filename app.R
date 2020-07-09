@@ -2,17 +2,8 @@
  
  # a shiny frontend for the nf-core/bacass pipeline
  # https://github.com/nf-core/bacass.git
- 
- library(shiny)
- library(shinyFiles)
- library(shinyjs)
- library(shinyalert)
- library(processx)
- library(stringr)
- library(digest)
- #library(yaml)
- #library(shinyFeedback)
- library(pingr) # to check if server has internet
+ libs <- c("shiny", "shinyFiles", "shinyjs", "shinyalert", "processx", "stringr", "digest", "dplyr", "pingr")
+ lapply(libs, library, character.only = TRUE)
  
  # define reactive to track user counts
  users <- reactiveValues(count = 0)
@@ -87,13 +78,18 @@
                           # tags$hr(),
                           selectizeInput("nxf_profile",
                                          label = "Select nextflow profile",
-                                         choices = c("docker", "conda"),
+                                         choices = c("docker", "test,docker", "conda"),
                                          selected = "docker",
                                          multiple = FALSE),
                           tags$hr(),
+                          selectizeInput("annotation_tool", 
+                                         label = "Annotation tool", 
+                                         choices = c("prokka", "dfast"), 
+                                         selected = "dfast", 
+                                         multiple = FALSE),
                           # actionButton("ncct", "Enter NCCT project info"),
                           # tags$hr(),
-                          #checkboxInput("tower", "Use Nextflow Tower to monitor run", value = FALSE),
+                          checkboxInput("tower", "Use Nextflow Tower to monitor run", value = FALSE)
                           #tags$hr(),
                           # the idea being - if trimmed are not needed - delete them (no changes in the nxf pipe)
                           #checkboxInput("save_trimmed", "Save fastp-trimmed files?", value = FALSE),
@@ -117,9 +113,10 @@
     options(shiny.launch.browser = TRUE, shiny.error=recover)
     
     #----
-    # reactive for optional params for nxf, so far only -with-tower, but others may be implemented here
+    # Initialization of reactive for optional params for nxf, 
+    # they are set later in renderPrint to params for nxf; others may be implemented here
     # set TOWER_ACCESS_TOKEN in ~/.Renviron
-    #optional_params <- reactiveValues(tower = "", mqc = "")
+    optional_params <- reactiveValues(tower = "", mqc = "", annotation_tool = "")
     
     # update user counts at each server call
     isolate({
@@ -136,26 +133,6 @@
     observeEvent(input$more, {
       shinyjs::toggle("optional_inputs")
     })
-    
-    # shinyFeeback observers
-    # title too short?
-    # observeEvent(input$report_title, {
-    #   feedbackWarning(inputId = "report_title", 
-    #                   condition = nchar(input$report_title) <= 10, 
-    #                   text = "Title too short?")
-    # })
-    
-    # observe({
-    #   if(input$tower) {
-    #   showSnackbar("tower_snackbar")
-    #   }
-    # })
-    
-    # observe({
-    #   if(input$save_trimmed) {
-    #     showSnackbar("fastp_trimmed")
-    #   }
-    # })
     
     #----
     # strategy for ncct modal and multiqc config file handling:
@@ -200,35 +177,35 @@
     
     # dir choose management --------------------------------------
     volumes <- c(Home = fs::path_home(), getVolumes()() )
-    #volumes = getVolumes() 
-    #shinyDirChoose(input, "fastq_folder", 
-    #               roots = volumes, 
-    #               session = session, 
-    #               restrictions = system.file(package = "base")) 
     
-    shinyFileChoose(input, 'csv_file', session=session,
-                    roots=volumes, filetypes=c('', 'csv', 'tsv'))
+    shinyFileChoose(input, 
+                    'csv_file', 
+                    session=session,
+                    roots=volumes, 
+                    filetypes=c('', 'csv', 'tsv'))
     
     #-----------------------------------
-    # show currently selected fastq folder (and count fastq files there)
+    # show currently selected csv/tsv file (and count fastq files there?)
     
     output$stdout <- renderPrint({
+      # set optional parameters, valid for all CASEs
+      # tower
+      optional_params$tower <- if(input$tower) {
+        "-with-tower"
+      } else {
+        ""
+      }
+      # annotation tool
+      optional_params$annotation_tool <- case_when(
+        input$annotation_tool == "prokka" ~ "--annotation_tool prokka",
+        input$annotation_tool == "dfast" ~ "--annotation_tool dfast"
+      )
+      
       if (is.integer(input$csv_file)) {
         cat("No .csv/.tsv file selected\n")
       } else {
         #nfastq <<- length(list.files(path = parseDirPath(volumes, input$fastq_folder), pattern = "*fast(q|q.gz)$"))
         
-        # setup of tower optional
-        # optional_params$tower <- if(input$tower) {
-        #   "-with-tower"
-        # } else {
-        #   ""
-        # }
-        
-        #shinyjs::hide("fastq_folder")
-        # file_selected<-parseFilePaths(volumes, input$fastq_folder)
-        # filePath<<-NULL
-        # filePath <<- c(filePath,as.character(file_selected$datapath))
         cat(
           " Selected .csv/.tsv file:\n",
           #filePath, "\n",
@@ -240,10 +217,10 @@
           "--input", 
           as.character(parseFilePaths(volumes, input$csv_file)$datapath), "\\ \n",
           "--skip_kraken2", "\\ \n",
-          "--annotation_tool dfast", "\\ \n",
+          optional_params$annotation_tool, "\\ \n",
           "-profile", 
           input$nxf_profile,  "\\ \n",
-          #optional_params$mqc, "\n",
+          optional_params$tower, "\n",
           
           "------------------\n")
        }
@@ -290,11 +267,11 @@
                                "--input", 
                                as.character(parseFilePaths(volumes, input$csv_file)$datapath), 
                                "--skip_kraken2",
-                               "--annotation_tool dfast",
+                               optional_params$annotation_tool,
                                "-profile", 
-                               input$nxf_profile), 
+                               input$nxf_profile,
                                #optional_params$mqc),
-                               #optional_params$tower),
+                               optional_params$tower),
                       
                         #wd = parseDirPath(volumes, input$csv_file),
                         wd = dirname(as.character(parseFilePaths(volumes, input$csv_file)$datapath)),
