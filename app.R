@@ -2,14 +2,15 @@
  
  # a shiny frontend for the nf-core/bacass pipeline
  # https://github.com/nf-core/bacass.git
- libs <- c("shiny", "shinyFiles", "shinyjs", "shinyalert", "processx", "stringr", "digest", "dplyr", "pingr")
+ libs <- c("shiny", "shinyFiles", "shinyjs", "shinyalert", "shinypop",
+           "processx", "stringr", "digest", "dplyr", "pingr", "yaml")
  lapply(libs, library, character.only = TRUE)
  
  # define reactive to track user counts
  users <- reactiveValues(count = 0)
  
- #source("ncct_modal.R", local = FALSE)$value # don't share across sessions, who knows what could happen!
- #source("ncct_make_yaml.R")
+ source("ncct_modal.R", local = FALSE)$value # don't share across sessions, who knows what could happen!
+ source("ncct_make_yaml.R")
  
  
  #### ui ####
@@ -32,6 +33,7 @@
             #useShinyFeedback(),
             useShinyjs(),
             useShinyalert(), 
+            use_notiflix_notify(position = "left-bottom", width = "380px"),
             
             # snackbars begin
             # snackbarWarning(id = "tower_snackbar", 
@@ -88,13 +90,13 @@
                                          choices = c("prokka", "dfast"), 
                                          selected = "dfast", 
                                          multiple = FALSE),
-                          # actionButton("ncct", "Enter NCCT project info"),
-                          # tags$hr(),
+                          tags$hr(),
+                          actionButton("ncct", "Enter NCCT project info"),
+                          tags$hr(),
+                          checkboxInput("skip_kraken", "Skip kraken2", value = FALSE),
+                          tags$hr(),
                           checkboxInput("tower", "Use Nextflow Tower to monitor run", value = FALSE)
                           #tags$hr(),
-                          # the idea being - if trimmed are not needed - delete them (no changes in the nxf pipe)
-                          #checkboxInput("save_trimmed", "Save fastp-trimmed files?", value = FALSE),
-                          #tags$hr()
 
               )
             )
@@ -117,7 +119,7 @@
     # Initialization of reactive for optional params for nxf, 
     # they are set later in renderPrint to params for nxf; others may be implemented here
     # set TOWER_ACCESS_TOKEN in ~/.Renviron
-    optional_params <- reactiveValues(tower = "", mqc = "", annotation_tool = "")
+    optional_params <- reactiveValues(tower = "", mqc = "", skip_kraken = "")
     
     # update user counts at each server call
     isolate({
@@ -142,39 +144,39 @@
     # initially, the reactive value mqc_config$rv is set to "", if input$ncct_ok then it is set to
     # c("--multiqc_config", mqc_config_temp) and this reactive is given as param to the nxf pipeline
     
-    # observer to generate ncct modal
-    # observeEvent(input$ncct, {
-    #   if(pingr::is_online()) {
-    #     ncct_modal_entries <- yaml::yaml.load_file("https://gist.githubusercontent.com/angelovangel/d079296b184eba5b124c1d434276fa28/raw/ncct_modal_entries")
-    #     showModal( ncct_modal(ncct_modal_entries) )
-    #   } else {
-    #     shinyalert("No internet!", 
-    #                text = "This feature requires internet connection", 
-    #                type = "warning")
-    #   }
-    #   
-    # })
+    #observer to generate ncct modal
+    observeEvent(input$ncct, {
+      if(pingr::is_online()) {
+        ncct_modal_entries <- yaml::yaml.load_file("https://gist.githubusercontent.com/angelovangel/d079296b184eba5b124c1d434276fa28/raw/ncct_modal_entries")
+        showModal( ncct_modal(ncct_modal_entries) )
+      } else {
+        shinyalert("No internet!",
+                   text = "This feature requires internet connection",
+                   type = "warning")
+      }
+
+    })
     
     # generate yml file in case OK of modal was pressed
     # the yml file is generated in the app exec env, using temp()
-    # observeEvent(input$ncct_ok, {
-    #   mqc_config_temp <- tempfile()
-    #   optional_params$mqc <- c("--multiqc_config", mqc_config_temp) 
-    #   ncct_make_yaml(customer = input$customer, 
-    #                  project_id = input$project_id, 
-    #                  ncct_contact = input$ncct_contact, 
-    #                  project_type = input$project_type, 
-    #                  lib_prep = input$lib_prep, 
-    #                  indexing = input$indexing, 
-    #                  seq_setup = input$seq_setup, 
-    #                  ymlfile = mqc_config_temp)
-    #   shinyalert(text = "Project info saved!", type = "info", timer = 1500, showConfirmButton = FALSE)
-    #   removeModal()
-    # })
+    observeEvent(input$ncct_ok, {
+      mqc_config_temp <- tempfile()
+      optional_params$mqc <- c("--multiqc_config", mqc_config_temp)
+      ncct_make_yaml(customer = input$customer,
+                     project_id = input$project_id,
+                     ncct_contact = input$ncct_contact,
+                     project_type = input$project_type,
+                     lib_prep = input$lib_prep,
+                     indexing = input$indexing,
+                     seq_setup = input$seq_setup,
+                     ymlfile = mqc_config_temp)
+      nx_notify_success("Project info saved!")
+      removeModal()
+    })
     
     
     # generate random hash for multiqc report temp file name
-    #mqc_hash <- sprintf("%s_%s.html", as.integer(Sys.time()), digest::digest(runif(1)) )
+    mqc_hash <- sprintf("%s_%s.html", as.integer(Sys.time()), digest::digest(runif(1)) )
     
     # dir choose management --------------------------------------
     volumes <- c(Home = fs::path_home(), getVolumes()() )
@@ -196,34 +198,31 @@
       } else {
         ""
       }
-      # annotation tool
-      optional_params$annotation_tool <- case_when(
-        input$annotation_tool == "prokka" ~ "prokka",
-        input$annotation_tool == "dfast" ~ "dfast"
-      )
+      
+      # skip kraken
+      optional_params$skip_kraken <- if(input$skip_kraken) {
+        "--skip_kraken2"
+      } else {
+        ""
+      }
       
       if (is.integer(input$csv_file)) {
-        cat("No .csv/.tsv file selected\n")
+        cat("Please select a .csv/.tsv file to start the pipeline\n")
       } else {
-        #nfastq <<- length(list.files(path = parseDirPath(volumes, input$fastq_folder), pattern = "*fast(q|q.gz)$"))
+        wd <<- fs::path_dir( parseFilePaths(volumes, input$csv_file)$datapath )
+        resultsdir <<- file.path(wd, 'results')
         
-        cat(
-          " Selected .csv/.tsv file:\n",
-          #filePath, "\n",
-          as.character(parseFilePaths(volumes, input$csv_file)$datapath),"\n",
-          "------------------\n\n",
-          
-          "Nextflow command to be executed:\n",
-          "nextflow run nf-core/bacass", "\\ \n",
-          "--input", 
-          as.character(parseFilePaths(volumes, input$csv_file)$datapath), "\\ \n",
-          "--skip_kraken2", "\\ \n",
-          "--annotation_tool", optional_params$annotation_tool, "\\ \n",
-          "-profile", 
-          input$nxf_profile,  "\\ \n",
-          optional_params$tower, "\n",
-          
-          "------------------\n")
+        nxf_args <<- c("run" ,"nf-core/bacass",
+                       "--input", parseFilePaths(volumes, input$csv_file)$datapath,
+                       "--annotation_tool", input$annotation_tool,
+                       "-profile", input$nxf_profile, 
+                       optional_params$skip,
+                       optional_params$tower,
+                       "--with-report", paste(resultsdir, "/nxf_workflow_report.html", sep = ""),
+                       optional_params$mqc)
+        
+        cat(" Nextflow command to be executed:\n\n",
+            "nextflow", nxf_args)
        }
     })
 
@@ -252,14 +251,16 @@
     
     # using processx to better control stdout
     observeEvent(input$run, {
-      if(is.integer(input$csv_file)) {
-        shinyjs::html(id = "stdout", "\nPlease select a .csv/.tsv file first, then press 'Run'...\n", add = TRUE)
+      if(is.integer(input$csv_file) & input$nxf_profile != "test,docker") {
+        shinyjs::html(id = "stdout", "\nPlease select a .csv/.tsv file first...", add = TRUE)
+        nx_notify_warning("No .csv/.tsv file selected!")
       } else {
         # set run button color to red?
         shinyjs::disable(id = "commands_pannel")
         # shinyjs::enable(id = "stopButton")
-       
-         # change label during run
+        nx_notify_success("Looks good, starting...")
+        
+        # change label during run
         shinyjs::html(id = "run", html = "Running... please wait")
         progress$set(message = "Working... ", value = 0)
         on.exit(progress$close() )
@@ -269,19 +270,8 @@
         withCallingHandlers({
           shinyjs::html(id = "stdout", "")
           p <- processx::run("nextflow", 
-                      args = c("run" ,
-                               "nf-core/bacass", # in case it is pulled before with nextflow pull and is in ~/.nextflow
-                               # fs::path_abs("nextflow-fastp/main.nf"), # absolute path to avoid pulling from github
-                               "--input", 
-                               as.character(parseFilePaths(volumes, input$csv_file)$datapath), 
-                               "--skip_kraken2",
-                               "--annotation_tool", optional_params$annotation_tool,
-                               "-profile", input$nxf_profile,
-                               #optional_params$mqc),
-                               optional_params$tower),
-                      
-                        #wd = parseDirPath(volumes, input$csv_file),
-                        wd = dirname(as.character(parseFilePaths(volumes, input$csv_file)$datapath)),
+                      args = nxf_args,
+                      wd = wd,
                       #echo_cmd = TRUE, echo = TRUE,
                       stdout_line_callback = function(line, proc) {message(line)}, # here you can kill the proc!!!
                       #stdout_callback = kill_func,
@@ -305,13 +295,6 @@
           work_dir <- paste(dirname(as.character(parseFilePaths(volumes, input$csv_file)$datapath)), "/work", sep = "")
           system2("rm", args = c("-rf", work_dir))
           cat("deleted", work_dir, "\n")
-          
-          # delete trimmed fastq files in case input$save_trimmed
-          #fastp_trimm_folder <- file.path(parseDirPath(volumes, input$fastq_folder), "results-fastp/fastp_trimmed")
-          # if(!input$save_trimmed) {
-          #   system2("rm", args = c("-rf", fastp_trimm_folder))
-          #   cat("deleted", fastp_trimm_folder, "\n")
-          # }
             
           # copy mqc to www/ to be able to open it, also use hash to enable multiple concurrent users
           # mqc_report <- paste(parseDirPath(volumes, input$fastq_folder), 

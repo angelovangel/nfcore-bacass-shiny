@@ -1,6 +1,6 @@
 ### nextflow-bacass-shiny
 
-This web app is a graphical interface for the [nf-core/bacass](https://github.com/nf-core/bacass) pipeline. 
+This web app is a GUI for the [nf-core/bacass](https://nf-core/bacass) bacterial genome assembly pipeline. 
 
 ### Usage
 
