@@ -81,7 +81,7 @@
               absolutePanel(top = 140, right = 20,
                           selectizeInput("nxf_profile",
                                          label = "Select nextflow profile",
-                                         choices = c("docker", "test,docker", "conda"),
+                                         choices = c("docker", "conda", "test"),
                                          selected = "docker",
                                          multiple = FALSE),
                           tags$hr(),
@@ -119,7 +119,7 @@
     # Initialization of reactive for optional params for nxf, 
     # they are set later in renderPrint to params for nxf; others may be implemented here
     # set TOWER_ACCESS_TOKEN in ~/.Renviron
-    optional_params <- reactiveValues(tower = "", mqc = "", skip_kraken = "")
+    optional_params <- reactiveValues(tower = "", mqc = "", skip_kraken = "", profile = "")
     
     # update user counts at each server call
     isolate({
@@ -205,9 +205,28 @@
       } else {
         ""
       }
-      
-      if (is.integer(input$csv_file)) {
+      # handle case -profile test
+      optional_params$profile <- if(input$nxf_profile == "test") {
+        "test,docker"
+      } else {
+        input$nxf_profile
+      }
+      # CASE1 - test profile
+      if(input$nxf_profile == "test") {
+        cat("In case a test profile is selected there is no need to select a .csv/.tsv file")
+        nx_notify_success("test profile selected - you can start the pipeline!")
+        wd <<- getwd()
+        resultsdir <<- file.path(wd, 'results')
+        
+        nxf_args <<- c("run" ,"nf-core/bacass", 
+                       "-profile", optional_params$profile)
+        cat(" Nextflow command to be executed:\n\n",
+            "nextflow", nxf_args)
+                       
+      } else if (is.integer(input$csv_file) ) {
         cat("Please select a .csv/.tsv file to start the pipeline\n")
+      
+      # CASE 2 normal run
       } else {
         wd <<- fs::path_dir( parseFilePaths(volumes, input$csv_file)$datapath )
         resultsdir <<- file.path(wd, 'results')
@@ -215,8 +234,10 @@
         nxf_args <<- c("run" ,"nf-core/bacass",
                        "--input", parseFilePaths(volumes, input$csv_file)$datapath,
                        "--annotation_tool", input$annotation_tool,
-                       "-profile", input$nxf_profile, 
-                       optional_params$skip,
+                       "-profile", optional_params$profile, 
+                       "--max_cpus", 8, 
+                       "--max_memory", '6.GB', 
+                       optional_params$skip_kraken,
                        optional_params$tower,
                        "--with-report", paste(resultsdir, "/nxf_workflow_report.html", sep = ""),
                        optional_params$mqc)
@@ -251,7 +272,8 @@
     
     # using processx to better control stdout
     observeEvent(input$run, {
-      if(is.integer(input$csv_file) & input$nxf_profile != "test,docker") {
+      
+      if(is.integer(input$csv_file) & input$nxf_profile != "test") {
         shinyjs::html(id = "stdout", "\nPlease select a .csv/.tsv file first...", add = TRUE)
         nx_notify_warning("No .csv/.tsv file selected!")
       } else {
@@ -262,7 +284,7 @@
         
         # change label during run
         shinyjs::html(id = "run", html = "Running... please wait")
-        progress$set(message = "Working... ", value = 0)
+        progress$set(message = "Pipeline running... ", value = 0)
         on.exit(progress$close() )
         
       # Dean Attali's solution
