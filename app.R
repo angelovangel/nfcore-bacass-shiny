@@ -35,14 +35,9 @@
             useShinyalert(), 
             use_notiflix_notify(position = "left-bottom", width = "380px"),
             
-            # snackbars begin
-            # snackbarWarning(id = "tower_snackbar", 
-            #                 message = "Is TOWER_ACCESS_TOKEN available in Sys.getenv() ?"),
-            # snackbarSuccess("fastp_trimmed", 
-            #                 message = "Default fastp parameters will be used"),
-            # snackbars end
-            
-            #shiny::uiOutput("mqc_report_button", inline = TRUE),
+            shiny::uiOutput("mqc_report_button", inline = TRUE),
+            shiny::uiOutput("nxf_report_button", inline = TRUE),
+            shiny::uiOutput("outputFilesLocation", inline = TRUE),
             
             shiny::div(id = "commands_pannel",
               shinyFilesButton(id = "csv_file", 
@@ -95,8 +90,9 @@
                           tags$hr(),
                           checkboxInput("skip_kraken", "Skip kraken2", value = FALSE),
                           tags$hr(),
-                          checkboxInput("tower", "Use Nextflow Tower to monitor run", value = FALSE)
-                          #tags$hr(),
+                          checkboxInput("tower", "Use Nextflow Tower to monitor run", value = FALSE),
+                          tags$hr(),
+                          checkboxInput("resume", "Try to resume previously failed run", value = FALSE)
 
               )
             )
@@ -114,12 +110,17 @@
  #### server ####
   server <- function(input, output, session) {
     options(shiny.launch.browser = TRUE, shiny.error=recover)
+    ncores <- parallel::detectCores() # use for info only
+    
+    nx_notify_success(paste("Hello ", Sys.getenv("LOGNAME"), 
+                            "! There are ", ncores, " cores available.", sep = "")
+    )
     
     #----
     # Initialization of reactive for optional params for nxf, 
     # they are set later in renderPrint to params for nxf; others may be implemented here
     # set TOWER_ACCESS_TOKEN in ~/.Renviron
-    optional_params <- reactiveValues(tower = "", mqc = "", skip_kraken = "", profile = "")
+    optional_params <- reactiveValues(tower = "", mqc = "", skip_kraken = "", profile = "", resume = "")
     
     # update user counts at each server call
     isolate({
@@ -177,6 +178,7 @@
     
     # generate random hash for multiqc report temp file name
     mqc_hash <- sprintf("%s_%s.html", as.integer(Sys.time()), digest::digest(runif(1)) )
+    nxf_hash <- sprintf("%s_%s.html", as.integer(Sys.time()), digest::digest(runif(1)) )
     
     # dir choose management --------------------------------------
     volumes <- c(Home = fs::path_home(), getVolumes()() )
@@ -192,11 +194,14 @@
     
     output$stdout <- renderPrint({
       # set optional parameters, valid for all CASEs
+      
       # tower
-      optional_params$tower <- if(input$tower) {
-        "-with-tower"
+      # set optional parameters, valid for all CASEs
+      if(input$tower) {
+        optional_params$tower <- "-with-tower"
+        nx_notify_warning("Make sure you have TOWER_ACCESS_TOKEN in your env")
       } else {
-        ""
+        optional_params$tower <- ""
       }
       
       # skip kraken
@@ -205,6 +210,14 @@
       } else {
         ""
       }
+      
+      # resume
+      optional_params$resume <- if(input$resume) {
+        "-resume"
+      } else {
+        ""
+      }
+        
       # handle case -profile test
       optional_params$profile <- if(input$nxf_profile == "test") {
         "test,docker"
@@ -219,7 +232,12 @@
         resultsdir <<- file.path(wd, 'results')
         
         nxf_args <<- c("run" ,"nf-core/bacass", 
-                       "-profile", optional_params$profile)
+                       "-c", "test.config", "-profile", "docker",
+                       #"--with-report", paste(resultsdir, "/nxf_workflow_report.html", sep = ""), #nf-core pipelines have it anyway
+                       optional_params$resume, 
+                       optional_params$tower
+                       )
+        
         cat(" Nextflow command to be executed:\n\n",
             "nextflow", nxf_args)
                        
@@ -239,8 +257,9 @@
                        "--max_memory", '6.GB', 
                        optional_params$skip_kraken,
                        optional_params$tower,
-                       "--with-report", paste(resultsdir, "/nxf_workflow_report.html", sep = ""),
-                       optional_params$mqc)
+                       #"--with-report", paste(resultsdir, "/nxf_workflow_report.html", sep = ""),
+                       optional_params$mqc, 
+                       optional_params$resume)
         
         cat(" Nextflow command to be executed:\n\n",
             "nextflow", nxf_args)
@@ -314,36 +333,58 @@
           
           # clean work dir in case run finished ok
           #work_dir <- paste(parseDirPath(volumes, input$csv_file), "/work", sep = "")
-          work_dir <- paste(dirname(as.character(parseFilePaths(volumes, input$csv_file)$datapath)), "/work", sep = "")
-          system2("rm", args = c("-rf", work_dir))
-          cat("deleted", work_dir, "\n")
+          work_dir <- file.path(wd, "work")
+          rmwork <- system2("rm", args = c("-rf", work_dir))
+          
+          if(rmwork == 0) {
+            nx_notify_success(paste("Temp work directory deleted -", work_dir))
+            cat("deleted", work_dir, "\n")
+          } else {
+            nx_notify_warning("Could not delete temp work directory!")
+          }
             
           # copy mqc to www/ to be able to open it, also use hash to enable multiple concurrent users
-          # mqc_report <- paste(parseDirPath(volumes, input$fastq_folder), 
-          #                  "/results/multiqc_report.html", # make sure the nextflow-fastp pipeline writes to "results-fastp"
-          #                  sep = "")
-          #  
-          # system2("cp", args = c(mqc_report, paste("www/", mqc_hash, sep = "")) )
+          mqc_report <- file.path(resultsdir, "MultiQC/multiqc_report.html")
+          nxf_report <- file.path(resultsdir, "pipeline_info", "execution_report.html")
           
+          system2("cp", args = c(mqc_report, paste("www/", mqc_hash, sep = "")) )
+          system2("cp", args = c(nxf_report, paste("www/", nxf_hash, sep = "")) )
+ 
+          #----
+          # render the new action buttons to show report and location of results
+          output$mqc_report_button <- renderUI({
+            actionButton("mqc", label = "MultiQC report", 
+                         icon = icon("th"), 
+                         onclick = sprintf("window.open('%s', '_blank')", mqc_hash)
+            )
+          })
           
-          # render the new action buttons to show report
-          # output$mqc_report_button <- renderUI({
-          #   actionButton("mqc", label = "MultiQC report",
-          #                icon = icon("th"),
-          #                onclick = sprintf("window.open('%s', '_blank')", mqc_hash)
-          #   )
-          # })
+          # render the new nxf report button
+          output$nxf_report_button <- renderUI({
+            actionButton("nxf", label = "Nextflow execution report", 
+                         icon = icon("th"), 
+                         onclick = sprintf("window.open('%s', '_blank')", nxf_hash)
+            )
+          })
+          
+          # render outputFilesLocation
+          output$outputFilesLocation <- renderUI({
+            actionButton("outLoc", label = paste("Where are the results?"), 
+                         icon = icon("th"), 
+                         onclick = sprintf("window.alert('%s')", resultsdir)
+            )
+          })
           # 
           #
           # build js callback string for shinyalert
-          # js_cb_string <- sprintf("function(x) { if (x == true) {window.open('%s') ;} } ", mqc_hash)
+          js_cb_string <- sprintf("function(x) { if (x == true) {window.open('%s') ;} } ", mqc_hash)
           
           shinyalert("Run finished!", type = "success", 
                    animation = "slide-from-bottom",
                    text = "Pipeline finished, check results folder", 
                    showCancelButton = FALSE, 
                    confirmButtonText = "OK",
-                   #callbackJS = js_cb_string 
+                   callbackJS = js_cb_string 
                    #callbackR = function(x) { js$openmqc(mqc_url) }
                    )
         } else {
